@@ -5,12 +5,10 @@ from sklearn.metrics.pairwise import cosine_similarity
 from transformers import AutoTokenizer
 import numpy as np
 import os
+import torch 
 
 # Login to HuggingFace (via Token)
 login(token=os.environ.get("HF_TOKEN"))
-
-# Loading a small public dataset to test Hugging Face Integration
-#dataset = load_dataset("ag_news", split="train[:5]")
 
 # Load PubMed biomedical abstracts
 dataset = load_dataset("qiaojin/PubMedQA", "pqa_labeled", split="train[:100]")
@@ -70,8 +68,7 @@ for i in range(5):
         print(f"  Q{j+1}: {q_j}...")
 '''
 
-#Testing similar embeddings from abstracts (Queries) with similarity
-# Filter abstracts that mention "mitochondria" in their context (for a more focused test)
+# Testing similar embeddings from abstracts (Queries) with similarity
 # Embed all abstracts
 model = SentenceTransformer("all-MiniLM-L6-v2")
 
@@ -103,7 +100,7 @@ for rank, idx in enumerate(top5_indices):
 top_embeddings = embeddings[top5_indices]
 similarity_matrix = cosine_similarity(top_embeddings)
 
-"""
+'''
 print("\nSimilarity Matrix (top 5 related abstracts):")
 print(np.round(similarity_matrix, 3))
 
@@ -114,4 +111,57 @@ for i in range(5):
         print(f"\nAbstract {i+1} vs Abstract {j+1}: {score:.3f}")
         print(f"  Q{i+1}: {top_questions[i][:70]}...")
         print(f"  Q{j+1}: {top_questions[j][:70]}...")
-"""
+'''
+
+### INFERENCE STAGE (using Llama to answer a question based on the abstracts I rerieved)
+## Adding inference to test the retrieval-augmented generation (RAG) pipeline with Llama
+model_id = "microsoft/Phi-3-mini-4k-instruct"
+
+print("\nLoading tokenizer...")
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+print("Loading model...")
+llm = AutoModelForCausalLM.from_pretrained(
+    model_id,
+    torch_dtype=torch.float16,  # float16 for GPU
+    device_map="auto"           # auto-detects GPU on Niagara
+)
+
+# Use the top ranked abstract and its question
+abstract = top_texts[0]
+question = top_questions[0]
+
+# Build prompt
+prompt = f"""<|user|>
+You are a biomedical research assistant.
+
+Abstract:
+{abstract}
+
+Question: {question}
+
+Answer yes or no and give a brief explanation.
+<|end|>
+<|assistant|>"""
+
+print("\nRunning inference...")
+inputs = tokenizer(prompt, return_tensors="pt").to(llm.device)
+
+with torch.no_grad():
+    outputs = llm.generate(
+        **inputs,
+        max_new_tokens=150,
+        do_sample=False,
+        temperature=None,
+        top_p=None
+    )
+# Decode only the new tokens (not the prompt)
+response = tokenizer.decode(
+    outputs[0][inputs["input_ids"].shape[1]:],
+    skip_special_tokens=True
+)
+print("\n--- INPUT ---")
+print(f"Question: {question}")
+print(f"\nAbstract: {abstract[:200]}...")
+print("\n--- MODEL OUTPUT ---")
+print(response)
