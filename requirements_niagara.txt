@@ -1,0 +1,10 @@
+datasets
+transformers
+huggingface_hub
+sentence-transformers
+scikit-learn
+accelerate
+torch
+tqdm
+numpy
+pandas
